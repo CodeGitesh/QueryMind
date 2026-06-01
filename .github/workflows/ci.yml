@@ -1,0 +1,181 @@
+name: QueryMind CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Backend Lint + Type Check ─────────────────────────────────────────────────
+  backend-lint:
+    name: Backend — Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install ruff black mypy
+        working-directory: backend
+
+      - name: Ruff lint
+        run: ruff check app/ tests/
+        working-directory: backend
+
+      - name: Black formatting check
+        run: black --check app/ tests/
+        working-directory: backend
+
+      - name: Mypy type check
+        run: mypy app/ --ignore-missing-imports --no-error-summary
+        working-directory: backend
+
+  # ── Backend Tests ─────────────────────────────────────────────────────────────
+  backend-test:
+    name: Backend — Tests
+    runs-on: ubuntu-latest
+    needs: backend-lint
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: querymind
+          POSTGRES_PASSWORD: querymind
+          POSTGRES_DB: querymind_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: backend
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: postgresql+asyncpg://querymind:querymind@localhost:5432/querymind_test
+          REDIS_URL: redis://localhost:6379/0
+          USE_SQLITE: "false"
+          GROQ_API_KEY: "test-key-for-ci"
+          SECRET_KEY: "test-secret-key-ci"
+          ENVIRONMENT: "development"
+        run: |
+          pytest tests/ -v \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+        working-directory: backend
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          flags: backend
+
+  # ── Frontend Lint + Type Check ────────────────────────────────────────────────
+  frontend-lint:
+    name: Frontend — Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: ESLint
+        run: npx eslint . --ext .ts,.tsx --max-warnings 0
+        working-directory: frontend
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+  # ── Docker Build Check ────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker — Build Verification
+    runs-on: ubuntu-latest
+    needs: [backend-lint, frontend-lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: querymind-backend:test
+
+  # ── Deploy (main branch only) ─────────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy — Railway (Backend)
+    runs-on: ubuntu-latest
+    needs: [backend-test, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service querymind-backend
+        working-directory: backend
+
+  deploy-frontend:
+    name: Deploy — Vercel (Frontend)
+    runs-on: ubuntu-latest
+    needs: [frontend-lint, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: frontend
+          vercel-args: "--prod"
