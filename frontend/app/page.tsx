@@ -21,7 +21,9 @@ export default function HomePage() {
 
   const [activePanel, setActivePanel] = useState<"history" | null>(null);
 
-  async function handleQuery(query: string, schemaName: string) {
+  // handle the main query submission
+  // TODO: might need to debounce this later if users spam it
+  async function handleQuery(q: string, sch: string) {
     setIsLoading(true);
     setResult(null);
     clearStreamSteps();
@@ -35,7 +37,8 @@ export default function HomePage() {
         let settled = false;
 
         ws.onopen = () => {
-          ws.send(JSON.stringify({ query, schema_name: schemaName, session_id: sessionId }));
+          // console.log("ws opened")
+          ws.send(JSON.stringify({ query: q, schema_name: sch, session_id: sessionId }));
         };
 
         ws.onmessage = (e: MessageEvent) => {
@@ -55,7 +58,8 @@ export default function HomePage() {
 
         ws.onerror = () => {
           if (!settled) {
-            // WebSocket failed — fall back to HTTP
+            // websocket failed for some reason -- just fall back to standard http
+            // console.error("ws error", e)
             settled = true;
             resolve(null);
           }
@@ -90,9 +94,9 @@ export default function HomePage() {
         return;
       }
 
-      // HTTP fallback
+      // fallback if ws dies or timeout
       addStreamStep("Generating SQL...");
-      const httpResult = await runQuery({ query, schema_name: schemaName, session_id: sessionId });
+      const httpResult = await runQuery({ query: q, schema_name: sch, session_id: sessionId });
       setResult(httpResult);
       addStreamStep("Done");
 

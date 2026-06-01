@@ -1,10 +1,8 @@
 """
-FastAPI application entry-point.
-- Lifespan context manager (startup/shutdown)
-- CORS middleware (strict origin whitelist)
-- Structured JSON logging
-- Rate-limiting via slowapi
-- Router registration
+FastAPI entry-point
+- lifespan startup stuff
+- cors (ugh)
+- rate limiting and routers
 """
 from __future__ import annotations
 
@@ -44,7 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await create_db_and_tables()
     log.info("Database initialised")
 
-    # 2. Redis connection
+    # 2. connect to redis cache
+    # TODO: what if redis is down? add fallback later
     await cache_service.connect()
     log.info("Redis connected", url=settings.REDIS_URL)
 
@@ -73,12 +72,13 @@ def create_app() -> FastAPI:
     )
 
     # ── Middleware ────────────────────────────────────────────────────────────
+    # cors is always a headache
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Session-ID"],
+        allow_headers=["*"], # just allow all for now, was blocking headers earlier
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

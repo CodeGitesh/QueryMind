@@ -59,8 +59,10 @@ class QueryMindAgent:
         self._llm = None
 
     def _get_llm(self):
+        # lazy loading the llm so it doesnt crash if keys are missing on boot
         if self._llm is None:
             self._llm = _build_llm()
+            # print("llm initialized")
         return self._llm
 
     async def run(
@@ -87,7 +89,7 @@ class QueryMindAgent:
         # 1. Select relevant tables
         await _emit("Selecting relevant tables...")
         relevant_tables = await schema_selector.get_relevant_tables(query, schema_name)
-        log.info("Relevant tables selected", tables=[t.table for t in relevant_tables])
+        # log.info("Relevant tables selected", tables=[t.table for t in relevant_tables]) # too spammy in logs
 
         # 2. Build system prompt
         system_prompt = build_system_prompt(schema_name, relevant_tables, schema_info)
@@ -135,6 +137,7 @@ class QueryMindAgent:
 
         async def stream_retry(conv: list[dict]) -> str:
             attempt_counter[0] += 1
+            # send message to frontend so user knows it failed but trying again
             await _emit(f"Fixing error (attempt {attempt_counter[0]})...")
             return await self._generate_sql(conv)
 
