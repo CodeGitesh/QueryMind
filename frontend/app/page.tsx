@@ -102,13 +102,13 @@ export default function HomePage() {
 
       const histItem: HistoryItem = {
         id: httpResult.query_id,
-        natural_language: query,
+        natural_language: q,
         generated_sql: httpResult.generated_sql,
         success: httpResult.success,
         attempt_count: httpResult.attempt_count,
         execution_time_ms: httpResult.execution_time_ms,
         result_row_count: httpResult.result?.row_count,
-        schema_used: schemaName,
+        schema_used: sch,
         created_at: new Date().toISOString(),
       };
       prependHistory(histItem);
